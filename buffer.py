@@ -1,0 +1,101 @@
+import torch
+
+def calculate_gae(rewards, values, next_values, dones, gamma, lam ):
+    '''
+    δ_t = r_t + γ·V(s_{t+1})·(1 - dones) - V(s_t)  
+    Â_t = δ_t + γλ·(1-dones)·Â_{t+1}.
+    '''
+    num_timesteps, num_envs = rewards.shape # (T timesteps, N envs)
+    not_dones = 1 - dones.float() # simplifies compute for end of episode, to bootstrap or not
+    values = torch.cat((values, next_values.unsqueeze(0)), dim=0) # [T,N] + [1, N] = [T+1, N]
+
+    advantages = torch.zeros_like(rewards)
+    gae = torch.zeros_like(rewards[0]) # puts gae on the same device and shape as next_value (N, )
+
+    for t in reversed(range(num_timesteps)):
+        delta = rewards[t, :] + gamma * values[t+1] * not_dones[t] - values[t, :]
+        gae = delta + gamma * lam * not_dones[t] * gae
+        advantages[t] = gae
+
+    returns = advantages + values[:-1] # G_t (bootstraped est. return) = A_t (expected) + V_t (critic expected value)
+    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+    return advantages, returns
+
+
+class Buffer():
+    def __init__(self, num_timesteps, num_envs, obs_dim, action_dim, device, gamma, lam):
+        super.__init__()
+
+        self.num_timesteps = num_timesteps
+        self.num_envs = num_envs
+        self.obs_dim = obs_dim
+        self.action_dim = action_dim
+        self.device = device
+        self.gamma = gamma
+        self.lam = lam
+
+        self.obs = torch.zeros(self.num_timesteps, self.num_envs, self.obs_dim, device=self.device)
+        self.actions = torch.zeros(self.num_timesteps, self.num_envs, self.action_dim, device=self.device)
+        self.log_prob = torch.zeros(self.num_timesteps, self.num_envs, device=self.device)
+        self.rewards = torch.zeros(self.num_timesteps, self.num_envs, device=self.device)
+        self.dones = torch.zeros(self.num_timesteps, self.num_envs, device=self.device)
+        self.values = torch.zeros(self.num_timesteps, self.num_envs, device=self.device)
+        self.advantages = torch.zeros(self.num_timesteps, self.num_envs, device=self.device)
+        self.returns = torch.zeros(self.num_timesteps, self.num_envs, device=self.device)
+
+        self.step = 0
+
+    def reset(self):
+        self.step = 0
+
+    def add (self, obs, action, log_prob, reward, done, value):
+        assert self.step < self.num_timesteps # should not trigger
+
+        self.obs[self.step] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
+        self.actions[self.step] = torch.as_tensor(action, dtype=torch.float32, device=self.device)
+        self.log_prob[self.step] = torch.as_tensor(log_prob, dtype=torch.float32, device=self.device)
+        self.rewards[self.step] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
+        self.dones[self.step] = torch.as_tensor(done, dtype=torch.float32, device=self.device)
+        self.values[self.step] = torch.as_tensor(value, dtype=torch.float32, device=self.device)
+
+        self.step += 1
+
+    @torch.no_grad()
+    def compute_advantage_return(self, next_values):
+        assert self.step == self.num_timesteps # should not trigger
+
+        next_values = torch.as_tensor(next_values, dtype=torch.float32, device=self.device)
+        self.advantages, self.returns = calculate_gae(
+            self.rewards, self.values, self.dones, next_values, self.dones, self.gamma, self.lam
+            )
+
+    def get_minibatches(self, minibatch_size):
+        batch_size = self.num_timesteps * self.num_envs
+
+        b_obs = self.obs.reshape(batch_size, self.obs_dim)
+        b_actions = self.actions.reshape(batch_size, self.action_dim)
+        b_log_probs = self.log_prob.reshape(batch_size)
+        b_advantages = self.advantages.reshape(batch_size)
+        b_returns = self.returns.reshape(batch_size)
+        b_values = self.values.reshape(batch_size)
+
+        indices = torch.randperm(batch_size, device=self.device)
+
+        for start in range(0,batch_size, minibatch_size):
+            mb = indices[start:start + minibatch_size]
+
+            yield {
+                "obs": b_obs[mb],
+                "actions": b_actions[mb],
+                "log_prob": b_log_probs[mb],
+                "advantages": b_advantages[mb],
+                "returns": b_returns[mb],
+                "values": b_values[mb]
+            }
+
+
+
+
+
+        

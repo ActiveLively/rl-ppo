@@ -7,7 +7,8 @@ ACTIVATIONS = {
     "gelu": nn.GELU, 
     "silu": nn.SiLU,
     "tanh": nn.Tanh,
-    "leaky_relu": nn.LeakyReLU
+    "leaky_relu": nn.LeakyReLU,
+    "elu": nn.ELU
 }
 class Block(nn.Module):
     '''
