@@ -54,18 +54,19 @@ class Block(nn.Module):
             
 
 class MLP(nn.Module):
-    def __init__(self,
-        input_dim: int,
-        output_dim: int,
-        hidden_dim: list[int],
-        activation: str = "relu",
-        dropout: float = 0.0,
-        norm: str | None = None,
-        residual: bool = False,
-        init: str | None = None,
-        gain: float = 2 ** 0.5,  # default value for ReLU, GELU, SiLU, and Leaky ReLU
-        output_gain: float = 1.0
-    ):
+    def __init__(
+            self,
+            input_dim: int,
+            output_dim: int,
+            hidden_dim: list[int],
+            activation: str = "relu",
+            dropout: float = 0.0,
+            norm: str | None = None,
+            residual: bool = False,
+            init: str | None = None,
+            gain: float = 2 ** 0.5,  # default value for ReLU, GELU, SiLU, and Leaky ReLU
+            output_gain: float = 1.0
+        ):
         super().__init__()
 
         if activation not in ACTIVATIONS:

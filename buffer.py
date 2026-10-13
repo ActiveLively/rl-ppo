@@ -25,8 +25,6 @@ def calculate_gae(rewards, values, next_values, dones, gamma, lam ):
 
 class Buffer():
     def __init__(self, num_timesteps, num_envs, obs_dim, action_dim, device, gamma, lam):
-        super.__init__()
-
         self.num_timesteps = num_timesteps
         self.num_envs = num_envs
         self.obs_dim = obs_dim
@@ -49,7 +47,7 @@ class Buffer():
     def reset(self):
         self.step = 0
 
-    def add (self, obs, action, log_prob, reward, done, value):
+    def add(self, obs, action, log_prob, reward, done, value):
         assert self.step < self.num_timesteps # should not trigger
 
         self.obs[self.step] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
@@ -67,7 +65,7 @@ class Buffer():
 
         next_values = torch.as_tensor(next_values, dtype=torch.float32, device=self.device)
         self.advantages, self.returns = calculate_gae(
-            self.rewards, self.values, self.dones, next_values, self.dones, self.gamma, self.lam
+            self.rewards, self.values, next_values, self.dones, self.gamma, self.lam
             )
 
     def get_minibatches(self, minibatch_size):
@@ -88,14 +86,8 @@ class Buffer():
             yield {
                 "obs": b_obs[mb],
                 "actions": b_actions[mb],
-                "log_prob": b_log_probs[mb],
+                "log_probs": b_log_probs[mb],
                 "advantages": b_advantages[mb],
                 "returns": b_returns[mb],
                 "values": b_values[mb]
             }
-
-
-
-
-
-        
