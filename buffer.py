@@ -5,14 +5,14 @@ def calculate_gae(rewards, values, next_values, dones, gamma, lam ):
     δ_t = r_t + γ·V(s_{t+1})·(1 - dones) - V(s_t)  
     Â_t = δ_t + γλ·(1-dones)·Â_{t+1}.
     '''
-    num_timesteps, num_envs = rewards.shape # (T timesteps, N envs)
+    num_steps, num_envs = rewards.shape # (T steps, N envs)
     not_dones = 1 - dones.float() # simplifies compute for end of episode, to bootstrap or not
     values = torch.cat((values, next_values.unsqueeze(0)), dim=0) # [T,N] + [1, N] = [T+1, N]
 
     advantages = torch.zeros_like(rewards)
     gae = torch.zeros_like(rewards[0]) # puts gae on the same device and shape as next_value (N, )
 
-    for t in reversed(range(num_timesteps)):
+    for t in reversed(range(num_steps)):
         delta = rewards[t, :] + gamma * values[t+1] * not_dones[t] - values[t, :]
         gae = delta + gamma * lam * not_dones[t] * gae
         advantages[t] = gae
@@ -24,8 +24,8 @@ def calculate_gae(rewards, values, next_values, dones, gamma, lam ):
 
 
 class Buffer():
-    def __init__(self, num_timesteps, num_envs, obs_dim, action_dim, device, gamma, lam):
-        self.num_timesteps = num_timesteps
+    def __init__(self, num_steps, num_envs, obs_dim, action_dim, device, gamma, lam):
+        self.num_steps = num_steps
         self.num_envs = num_envs
         self.obs_dim = obs_dim
         self.action_dim = action_dim
@@ -33,14 +33,14 @@ class Buffer():
         self.gamma = gamma
         self.lam = lam
 
-        self.obs = torch.zeros(self.num_timesteps, self.num_envs, self.obs_dim, device=self.device)
-        self.actions = torch.zeros(self.num_timesteps, self.num_envs, self.action_dim, device=self.device)
-        self.log_prob = torch.zeros(self.num_timesteps, self.num_envs, device=self.device)
-        self.rewards = torch.zeros(self.num_timesteps, self.num_envs, device=self.device)
-        self.dones = torch.zeros(self.num_timesteps, self.num_envs, device=self.device)
-        self.values = torch.zeros(self.num_timesteps, self.num_envs, device=self.device)
-        self.advantages = torch.zeros(self.num_timesteps, self.num_envs, device=self.device)
-        self.returns = torch.zeros(self.num_timesteps, self.num_envs, device=self.device)
+        self.obs = torch.zeros(self.num_steps, self.num_envs, self.obs_dim, device=self.device)
+        self.actions = torch.zeros(self.num_steps, self.num_envs, self.action_dim, device=self.device)
+        self.log_prob = torch.zeros(self.num_steps, self.num_envs, device=self.device)
+        self.rewards = torch.zeros(self.num_steps, self.num_envs, device=self.device)
+        self.dones = torch.zeros(self.num_steps, self.num_envs, device=self.device)
+        self.values = torch.zeros(self.num_steps, self.num_envs, device=self.device)
+        self.advantages = torch.zeros(self.num_steps, self.num_envs, device=self.device)
+        self.returns = torch.zeros(self.num_steps, self.num_envs, device=self.device)
 
         self.step = 0
 
@@ -48,7 +48,7 @@ class Buffer():
         self.step = 0
 
     def add(self, obs, action, log_prob, reward, done, value):
-        assert self.step < self.num_timesteps # should not trigger
+        assert self.step < self.num_steps # should not trigger
 
         self.obs[self.step] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
         self.actions[self.step] = torch.as_tensor(action, dtype=torch.float32, device=self.device)
@@ -61,7 +61,7 @@ class Buffer():
 
     @torch.no_grad()
     def compute_advantage_return(self, next_values):
-        assert self.step == self.num_timesteps # should not trigger
+        assert self.step == self.num_steps # should not trigger
 
         next_values = torch.as_tensor(next_values, dtype=torch.float32, device=self.device)
         self.advantages, self.returns = calculate_gae(
@@ -69,7 +69,7 @@ class Buffer():
             )
 
     def get_minibatches(self, minibatch_size):
-        batch_size = self.num_timesteps * self.num_envs
+        batch_size = self.num_steps * self.num_envs
 
         b_obs = self.obs.reshape(batch_size, self.obs_dim)
         b_actions = self.actions.reshape(batch_size, self.action_dim)
