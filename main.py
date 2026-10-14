@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+
 import gymnasium as gym
 from tqdm import tqdm
 
@@ -8,8 +9,8 @@ from ppo import PPO
 from buffer import Buffer
 
 
-def run_ppo():
 
+def run_ppo():
     # ppo parameters
     num_envs = 8
     timesteps = 200000
@@ -25,13 +26,13 @@ def run_ppo():
     # Buffer parameters
     # GAE gamma and lambda
     gamma = 0.99
-    lam = 0.1
+    lam = 0.95
 
     actor_critic = ActorCritic(
         input_dim = env.obs_dim,
         actor_hidden_dim = [256,256],
         critic_hidden_dim = [256, 256],
-        action_dim = 17,
+        action_dim = env.action_dim,
         activation = "tanh",
         dropout = 0.0,
         norm = "layer",
@@ -73,3 +74,5 @@ def run_ppo():
         ppo.rollout()
         ppo.update()
 
+if __name__ == "__main__":
+    run_ppo()

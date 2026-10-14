@@ -15,7 +15,7 @@ class PPO():
             lr: float = 3e-4,
             clip_eps: float = 0.2,
             c1_value: float = 0.5,
-            c2_entropy: float = 0.0,
+            c2_entropy: float = 0.0
         ):
         self.env = env
         self.actor_critic = actor_critic
@@ -37,8 +37,8 @@ class PPO():
         
         for i in range(self.steps):
             action, log_prob, value = self.actor_critic.act(obs)
-            next_obs, reward, done = self.env.step(action)
-            self.buffer.add(obs, action, log_prob, reward, done, value)
+            next_obs, reward, terminated, truncated = self.env.step(action)
+            self.buffer.add(obs, action, log_prob, reward, terminated, truncated, value)
 
             obs = next_obs
 
