@@ -1,14 +1,19 @@
-import torch 
+import torch
 from actor_critic import ActorCritic
 from buffer import Buffer
 from logger import MeanTracker
+from normalization import RunningMeanStd
+
+# bounds for the adaptive KL learning rate
+MIN_LR = 1e-5
+MAX_LR = 1e-2
 
 
 class PPO():
     def __init__(
             self,
             env,
-            actor_critic: ActorCritic, 
+            actor_critic: ActorCritic,
             buffer: Buffer,
             steps: int,
             epochs: int,
@@ -16,8 +21,20 @@ class PPO():
             lr: float = 3e-4,
             clip_eps: float = 0.2,
             c1_value: float = 0.5,
-            c2_entropy: float = 0.0
+            c2_entropy: float = 0.0,
+            max_grad_norm: float = 0.5,
+            desired_kl: float | None = None,
+            clip_value: bool = False,
+            normalize_value: bool = False
         ):
+        '''
+        max_grad_norm:   global grad-norm clip
+        desired_kl:      adaptive lr (rsl_rl / skrl KLAdaptiveLR): lr /1.5 if kl > 2*desired_kl, lr *1.5 if kl < desired_kl/2.
+                         None = fixed lr
+        clip_value:      PPO-style value clipping, value can move at most clip_eps from its rollout prediction
+        normalize_value: critic predicts returns normalized by running mean/std (skrl value_preprocessor).
+                         buffer still holds values/returns in reward scale, so GAE and logging are unchanged
+        '''
         self.env = env
         self.actor_critic = actor_critic
         self.buffer = buffer
@@ -28,25 +45,39 @@ class PPO():
         self.clip_eps = clip_eps
         self.c1_value = c1_value
         self.c2_entropy = c2_entropy
+        self.max_grad_norm = max_grad_norm
+        self.desired_kl = desired_kl
+        self.clip_value = clip_value
+
+        device = next(self.actor_critic.parameters()).device
+        self.value_rms = RunningMeanStd(shape = (), device = device) if normalize_value else None
 
         self.optimizer = torch.optim.Adam(self.actor_critic.parameters(), lr = self.lr)
+
+    def _denormalize_value(self, value):
+        '''critic output -> reward scale'''
+        return self.value_rms.denormalize(value) if self.value_rms is not None else value
 
     @torch.no_grad()
     def rollout(self):
         self.buffer.reset()
         obs = self.env.get_obs()
-        
+
         for i in range(self.steps):
             action, log_prob, value = self.actor_critic.act(obs)
             next_obs, reward, terminated, truncated = self.env.step(action)
-            self.buffer.add(obs, action, log_prob, reward, terminated, truncated, value)
+            self.buffer.add(obs, action, log_prob, reward, terminated, truncated, self._denormalize_value(value))
 
             obs = next_obs
 
         # bootstrap value of the state after the last collected step -> [num_envs]
-        next_values = self.actor_critic.value(obs)
+        next_values = self._denormalize_value(self.actor_critic.value(obs))
 
         self.buffer.compute_advantage_return(next_values)
+
+        # update return stats once per rollout, they stay fixed for all epochs of update()
+        if self.value_rms is not None:
+            self.value_rms.update(self.buffer.returns)
 
 
     def update(self):
@@ -60,31 +91,54 @@ class PPO():
                 b_returns = mb["returns"]
                 b_values = mb["values"]
 
+                # value loss is computed in the critic's output space
+                if self.value_rms is not None:
+                    b_returns = self.value_rms.normalize(b_returns)
+                    b_values = self.value_rms.normalize(b_values)
+
                 log_probs, entropy, values = self.actor_critic.evaluate(b_obs, b_actions)
 
-                ratio = torch.exp(log_probs - b_log_probs)
+                log_ratio = log_probs - b_log_probs
+                ratio = torch.exp(log_ratio)
                 clip_0 = ratio * b_advantages
                 clip_1 = torch.clamp(ratio, 1 - self.clip_eps, 1 + self.clip_eps) * b_advantages
 
                 L_clip = torch.min(clip_0, clip_1)
 
-                L_vf = torch.square(values - b_returns)
+                if self.clip_value:
+                    values_clipped = b_values + torch.clamp(values - b_values, -self.clip_eps, self.clip_eps)
+                    L_vf = torch.max(torch.square(values - b_returns), torch.square(values_clipped - b_returns))
+                else:
+                    L_vf = torch.square(values - b_returns)
 
                 loss = -1 * torch.mean(L_clip - self.c1_value * L_vf + self.c2_entropy * entropy)
 
+                with torch.no_grad():
+                    approx_kl = ((ratio - 1) - log_ratio).mean() # low-variance KL estimator
+
+                # adaptive lr: adjust before this minibatch's step (same as rsl_rl)
+                if self.desired_kl is not None:
+                    kl = approx_kl.item()
+                    lr = self.optimizer.param_groups[0]["lr"]
+                    if kl > 2.0 * self.desired_kl:
+                        lr = max(MIN_LR, lr / 1.5)
+                    elif 0.0 < kl < self.desired_kl / 2.0:
+                        lr = min(MAX_LR, lr * 1.5)
+                    for group in self.optimizer.param_groups:
+                        group["lr"] = lr
+
                 self.optimizer.zero_grad()
                 loss.backward()
-                grad_norm = torch.nn.utils.clip_grad_norm_(self.actor_critic.parameters(), 0.5) # suggested for PPO gradient clipping, returns pre-clip norm
+                grad_norm = torch.nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm) # returns pre-clip norm
                 self.optimizer.step()
 
                 with torch.no_grad():
-                    log_ratio = log_probs - b_log_probs
                     stats.add(
                         loss = loss,
                         policy_loss = -L_clip.mean(),
                         value_loss = L_vf.mean(),
                         entropy = entropy.mean(),
-                        approx_kl = ((ratio - 1) - log_ratio).mean(), # low-variance KL estimator
+                        approx_kl = approx_kl,
                         clip_frac = ((ratio - 1).abs() > self.clip_eps).float().mean(),
                         ratio_max = ratio.max(),
                         grad_norm = grad_norm
@@ -93,11 +147,3 @@ class PPO():
         with torch.no_grad():
             _, std = self.actor_critic.get_mean_std(b_obs)
         return {**stats.means(), "action_std": std.mean().item(), "lr": self.optimizer.param_groups[0]["lr"]}
-
-
-
-                
-
-
-
-         

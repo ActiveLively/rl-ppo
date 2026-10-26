@@ -71,6 +71,10 @@ def run_ppo():
     clip_eps = 0.2
     c1_value = 0.5
     c2_entropy = 0.001
+    max_grad_norm = 0.5
+    desired_kl = None # e.g. 0.01 for adaptive lr, None = fixed lr
+    clip_value = False
+    normalize_value = False
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     env = VecEnv("FetchReachDense-v4", num_envs, device)
@@ -88,7 +92,9 @@ def run_ppo():
         config = dict(
             env_id = "FetchReachDense-v4", num_envs = num_envs, timesteps = timesteps, steps = steps,
             epochs = epochs, minibatch_size = minibatch_size, lr = lr, clip_eps = clip_eps,
-            c1_value = c1_value, c2_entropy = c2_entropy, gamma = gamma, lam = lam
+            c1_value = c1_value, c2_entropy = c2_entropy, gamma = gamma, lam = lam,
+            max_grad_norm = max_grad_norm, desired_kl = desired_kl, clip_value = clip_value,
+            normalize_value = normalize_value
         )
     )
 
@@ -129,7 +135,11 @@ def run_ppo():
         lr = lr,
         clip_eps = clip_eps,
         c1_value = c1_value,
-        c2_entropy = c2_entropy
+        c2_entropy = c2_entropy,
+        max_grad_norm = max_grad_norm,
+        desired_kl = desired_kl,
+        clip_value = clip_value,
+        normalize_value = normalize_value
     )
 
     # iterations loop, rollout (collect data + compute GAE) -> update (evaluate + loss calculation + optimizer)
