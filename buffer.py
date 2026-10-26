@@ -6,7 +6,7 @@ def calculate_gae(rewards, values, next_values, terminated, truncated, gamma, la
     δ_t = r_t + γ·V(s_{t+1})·(1 - dones) - V(s_t)  
     Â_t = δ_t + γλ·(1-dones)·Â_{t+1}.
 
-    new GAE logic to account for terminated (failed) and truncated (run out of time) ends
+    new GAE logic to account for terminated (failed) and truncated (run wout of time) ends
     '''
     num_steps, num_envs = rewards.shape # (T steps, N envs)s
 

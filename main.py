@@ -10,6 +10,7 @@ from tqdm import tqdm
 from actor_critic import ActorCritic
 from ppo import PPO
 from buffer import Buffer
+from logger import TrainingLogger
 
 gym.register_envs(gymnasium_robotics)
 
@@ -79,6 +80,18 @@ def run_ppo():
     gamma = 0.98
     lam = 0.95
 
+    # logging: PPO diagnostics + rollout stats -> runs/<run_name>/metrics.jsonl
+    logger = TrainingLogger(
+        log_dir = "runs",
+        run_name = "fetch_reach",
+        writers = ("jsonl",), # add "tensorboard" after `pip install tensorboard`
+        config = dict(
+            env_id = "FetchReachDense-v4", num_envs = num_envs, timesteps = timesteps, steps = steps,
+            epochs = epochs, minibatch_size = minibatch_size, lr = lr, clip_eps = clip_eps,
+            c1_value = c1_value, c2_entropy = c2_entropy, gamma = gamma, lam = lam
+        )
+    )
+
     actor_critic = ActorCritic(
         input_dim = env.obs_dim,
         actor_hidden_dim = [256,256],
@@ -119,18 +132,27 @@ def run_ppo():
         c2_entropy = c2_entropy
     )
 
+    # iterations loop, rollout (collect data + compute GAE) -> update (evaluate + loss calculation + optimizer)
     iters = timesteps // (steps * num_envs)
     pbar = tqdm(range(1, iters + 1), desc= "Training PPO")   
     for it in pbar:
         ppo.rollout()
-        ppo.update()
+        ppo_stats = ppo.update()
 
-        
-        postfix = {"avg_reward": f"{buffer.rewards.mean().item():.3f}"}
         success_rate = env.pop_success_rate()
+        metrics = logger.log_iteration(
+            step = it * steps * num_envs,
+            ppo_stats = ppo_stats,
+            buffer = buffer,
+            extra = {"rollout/success_rate": success_rate}
+        )
+
+        postfix = {"avg_reward": f"{metrics['rollout/reward_mean']:.3f}", "kl": f"{ppo_stats['approx_kl']:.4f}"}
         if success_rate is not None:
             postfix["success"] = f"{success_rate:.2f}"
         pbar.set_postfix(postfix)
+
+    logger.close()
 
     # save weights + obs normalization stats (the policy was trained on normalized obs)
     os.makedirs("checkpoints", exist_ok=True)

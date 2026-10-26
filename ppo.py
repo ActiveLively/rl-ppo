@@ -1,6 +1,7 @@
 import torch 
 from actor_critic import ActorCritic
 from buffer import Buffer
+from logger import MeanTracker
 
 
 class PPO():
@@ -49,6 +50,7 @@ class PPO():
 
 
     def update(self):
+        stats = MeanTracker()
         for epoch in range(self.epochs):
             for mb in self.buffer.get_minibatches(minibatch_size = self.minibatch_size):
                 b_obs = mb["obs"]
@@ -72,8 +74,25 @@ class PPO():
 
                 self.optimizer.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.actor_critic.parameters(), 0.5) # suggested for PPO gradient clipping
+                grad_norm = torch.nn.utils.clip_grad_norm_(self.actor_critic.parameters(), 0.5) # suggested for PPO gradient clipping, returns pre-clip norm
                 self.optimizer.step()
+
+                with torch.no_grad():
+                    log_ratio = log_probs - b_log_probs
+                    stats.add(
+                        loss = loss,
+                        policy_loss = -L_clip.mean(),
+                        value_loss = L_vf.mean(),
+                        entropy = entropy.mean(),
+                        approx_kl = ((ratio - 1) - log_ratio).mean(), # low-variance KL estimator
+                        clip_frac = ((ratio - 1).abs() > self.clip_eps).float().mean(),
+                        ratio_max = ratio.max(),
+                        grad_norm = grad_norm
+                    )
+
+        with torch.no_grad():
+            _, std = self.actor_critic.get_mean_std(b_obs)
+        return {**stats.means(), "action_std": std.mean().item(), "lr": self.optimizer.param_groups[0]["lr"]}
 
 
 
