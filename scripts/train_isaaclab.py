@@ -1,4 +1,5 @@
-import os
+# built by Claude
+
 import argparse
 
 from isaaclab.app import AppLauncher
@@ -16,13 +17,9 @@ import torch
 import gymnasium as gym
 import isaaclab_tasks # registers the Isaac-* gym envs
 from isaaclab_tasks.utils import parse_env_cfg
-from tqdm import tqdm
 
-from actor_critic import ActorCritic
-from ppo import PPO
-from buffer import Buffer
-from logger import TrainingLogger
-from isaaclab_env import IsaacLabEnv
+from rl_ppo import ActorCritic, Buffer, PPO, Runner, TrainingLogger
+from rl_ppo.envs.isaaclab_env import IsaacLabEnv
 
 
 def run_ppo():
@@ -105,28 +102,11 @@ def run_ppo():
         normalize_obs = normalize_obs
     )
 
-    pbar = tqdm(range(1, iters + 1), desc = "Training PPO")
-    for it in pbar:
-        ppo.rollout()
-        ppo_stats = ppo.update()
-
-        metrics = logger.log_iteration(
-            step = it * steps * env.num_envs,
-            ppo_stats = ppo_stats,
-            buffer = buffer,
-            extra = env.pop_episode_logs()
-        )
-        pbar.set_postfix({"avg_reward": f"{metrics['rollout/reward_mean']:.3f}", "kl": f"{ppo_stats['kl']:.4f}"})
-
+    runner = Runner(env, ppo, logger)
+    runner.train(iters = iters)
     logger.close()
 
-    os.makedirs("checkpoints", exist_ok=True)
-    torch.save({
-        "model": actor_critic.state_dict(),
-        "obs_mean": ppo.obs_rms.mean.cpu().numpy(),
-        "obs_var": ppo.obs_rms.var.cpu().numpy(),
-    }, f"checkpoints/{args.task}.pt")
-
+    runner.save(f"checkpoints/{args.task}.pt")
     env.close()
 
 

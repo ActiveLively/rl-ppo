@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rl-ppo"
+version = "0.1.0"
+description = "personal implementation for PPO"
+requires-python = ">=3.10" # code uses `float | None`
+dependencies = ["torch", "numpy", "tqdm"]
+
+[project.optional-dependencies]
+gym = ["gymnasium", "gymnasium-robotics"]
+mjx = ["playground"] # MuJoCo Playground: pulls in jax, mujoco-mjx, brax
+# sharing one env with [gym]: gymnasium-robotics 1.4.2's Fetch envs break on mujoco 3.17 (latest playground),
+# so pin `playground==0.0.5 mujoco==3.3.6 mujoco-mjx==3.3.6` there
+
+[tool.setuptools.packages.find]
+include = ["rl_ppo*"]

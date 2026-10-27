@@ -1,7 +1,7 @@
 import torch
 import gymnasium as gym
 import gymnasium_robotics
-from actor_critic import ActorCritic
+from rl_ppo import ActorCritic
 
 gym.register_envs(gymnasium_robotics)
 

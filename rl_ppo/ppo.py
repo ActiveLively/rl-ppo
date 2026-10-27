@@ -1,8 +1,9 @@
 import torch 
-from actor_critic import ActorCritic
-from buffer import Buffer
-from logger import MeanTracker
-from normalization import RunningMeanStd
+from .actor_critic import ActorCritic
+from .buffer import Buffer
+from .envs.base import VecEnv
+from .logger import MeanTracker
+from .normalization import RunningMeanStd
 
 # bounds for the adaptive KL learning rate
 MIN_LR = 1e-5
@@ -11,7 +12,7 @@ MAX_LR = 1e-2
 class PPO():
     def __init__(
             self,
-            env,
+            env: VecEnv,
             actor_critic: ActorCritic, 
             buffer: Buffer,
             steps: int,

@@ -1,3 +1,4 @@
+# built by Claude
 import torch
 
 
@@ -34,7 +35,7 @@ class IsaacLabEnv:
             self.episode_logs.setdefault(k, []).append(v.item() if torch.is_tensor(v) else float(v))
         return self.obs, reward, terminated, truncated
 
-    def pop_episode_logs(self):
+    def pop_metrics(self):
         logs = {f"episode/{k}": sum(v) / len(v) for k, v in self.episode_logs.items()}
         self.episode_logs = {}
         return logs

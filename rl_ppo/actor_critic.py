@@ -1,5 +1,5 @@
 import numpy as np 
-from mlp import MLP
+from .mlp import MLP
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
