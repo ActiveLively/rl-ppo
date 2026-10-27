@@ -79,7 +79,7 @@ class ActorCritic(nn.Module):
         log_prob = dist.log_prob(action).sum(dim=-1)
         value = self.value(x)
 
-        return action, log_prob, value
+        return action, log_prob, value, mean, std # mean/std stored for the exact KL in update()
 
     def value(self, x):
         return self.critic(x).squeeze(-1)
@@ -92,4 +92,4 @@ class ActorCritic(nn.Module):
         entropy = dist.entropy().sum(dim=-1)
         value = self.value(x)
 
-        return log_prob, entropy, value
+        return log_prob, entropy, value, mean, std

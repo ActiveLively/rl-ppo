@@ -45,6 +45,8 @@ class Buffer():
         self.obs = torch.zeros(self.num_steps, self.num_envs, self.obs_dim, device=self.device)
         self.actions = torch.zeros(self.num_steps, self.num_envs, self.action_dim, device=self.device)
         self.log_prob = torch.zeros(self.num_steps, self.num_envs, device=self.device)
+        self.mu = torch.zeros(self.num_steps, self.num_envs, self.action_dim, device=self.device) # rollout policy mean/std, for the exact KL
+        self.sigma = torch.zeros(self.num_steps, self.num_envs, self.action_dim, device=self.device)
         self.rewards = torch.zeros(self.num_steps, self.num_envs, device=self.device)
         self.terminateds = torch.zeros(self.num_steps, self.num_envs, device=self.device)
         self.truncateds = torch.zeros(self.num_steps, self.num_envs, device=self.device)
@@ -57,7 +59,7 @@ class Buffer():
     def reset(self):
         self.step = 0
 
-    def add(self, obs, action, log_prob, reward, terminated, truncated, value):
+    def add(self, obs, action, log_prob, reward, terminated, truncated, value, mu, sigma):
         assert self.step < self.num_steps # should not trigger
 
         self.obs[self.step] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
@@ -67,6 +69,8 @@ class Buffer():
         self.terminateds[self.step] = torch.as_tensor(terminated, dtype=torch.float32, device=self.device)
         self.truncateds[self.step] = torch.as_tensor(truncated, dtype=torch.float32, device=self.device)
         self.values[self.step] = torch.as_tensor(value, dtype=torch.float32, device=self.device)
+        self.mu[self.step] = torch.as_tensor(mu, dtype=torch.float32, device=self.device)
+        self.sigma[self.step] = torch.as_tensor(sigma, dtype=torch.float32, device=self.device)
 
         self.step += 1
 
@@ -88,6 +92,8 @@ class Buffer():
         b_advantages = self.advantages.reshape(batch_size)
         b_returns = self.returns.reshape(batch_size)
         b_values = self.values.reshape(batch_size)
+        b_mu = self.mu.reshape(batch_size, self.action_dim)
+        b_sigma = self.sigma.reshape(batch_size, self.action_dim)
 
         indices = torch.randperm(batch_size, device=self.device)
 
@@ -100,5 +106,7 @@ class Buffer():
                 "log_probs": b_log_probs[mb],
                 "advantages": b_advantages[mb],
                 "returns": b_returns[mb],
-                "values": b_values[mb]
+                "values": b_values[mb],
+                "mu": b_mu[mb],
+                "sigma": b_sigma[mb]
             }
