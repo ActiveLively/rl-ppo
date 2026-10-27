@@ -16,7 +16,7 @@ class PPO():
             buffer: Buffer,
             steps: int,
             epochs: int,
-            minibatch_size: int,
+            num_minibatches: int,
             lr: float = 3e-4,
             clip_eps: float = 0.2,
             c1_value: float = 0.5,
@@ -24,7 +24,8 @@ class PPO():
             max_grad_norm: float = 0.5,
             desired_kl: float | None = None,
             clip_value: bool = False,
-            normalize_value: bool = False
+            normalize_value: bool = False,
+            normalize_obs: bool = True
         ):
         '''
         max_grad_norm:   global grad-norm clip
@@ -33,13 +34,15 @@ class PPO():
         clip_value:      PPO-style value clipping, value can move at most clip_eps from its rollout prediction
         normalize_value: critic predicts returns normalized by running mean/std (skrl value_preprocessor).
                          buffer still holds values/returns in reward scale, so GAE and logging are unchanged
+        normalize_obs:   running mean/std obs normalization on the GPU, updated every rollout step (rsl_rl EmpiricalNormalization).
+                         buffer stores normalized obs, so update() sees exactly what the rollout policy saw
         '''
         self.env = env
         self.actor_critic = actor_critic
         self.buffer = buffer
         self.steps = steps
         self.epochs = epochs
-        self.minibatch_size = minibatch_size
+        self.num_minibatches = num_minibatches
         self.lr = lr
         self.clip_eps = clip_eps
         self.c1_value = c1_value
@@ -50,6 +53,7 @@ class PPO():
 
         device = next(self.actor_critic.parameters()).device
         self.value_rms = RunningMeanStd(shape = (), device = device) if normalize_value else None
+        self.obs_rms = RunningMeanStd(shape = (buffer.obs_dim,), device = device) if normalize_obs else None
 
         self.optimizer = torch.optim.Adam(self.actor_critic.parameters(), lr = self.lr)
 
@@ -57,20 +61,28 @@ class PPO():
         '''critic output -> reward scale'''
         return self.value_rms.denormalize(value) if self.value_rms is not None else value
 
+    def _normalize_obs(self, obs, update = False):
+        '''raw env obs -> policy input'''
+        if self.obs_rms is None:
+            return obs
+        if update:
+            self.obs_rms.update(obs)
+        return self.obs_rms.normalize(obs)
+
     @torch.no_grad()
     def rollout(self):
         self.buffer.reset()
-        obs = self.env.get_obs()
-        
+        raw_obs = self.env.get_obs()
+
         for i in range(self.steps):
+            obs = self._normalize_obs(raw_obs, update = True)
             action, log_prob, value, mu, sigma = self.actor_critic.act(obs)
-            next_obs, reward, terminated, truncated = self.env.step(action)
+            raw_obs, reward, terminated, truncated = self.env.step(action)
             self.buffer.add(obs, action, log_prob, reward, terminated, truncated, self._denormalize_value(value), mu, sigma)
 
-            obs = next_obs
-
         # bootstrap value of the state after the last collected step -> [num_envs]
-        next_values = self._denormalize_value(self.actor_critic.value(obs))
+        # no stats update here, this obs is counted at the start of the next rollout
+        next_values = self._denormalize_value(self.actor_critic.value(self._normalize_obs(raw_obs)))
 
         self.buffer.compute_advantage_return(next_values)
 
@@ -82,7 +94,7 @@ class PPO():
     def update(self):
         stats = MeanTracker()
         for epoch in range(self.epochs):
-            for mb in self.buffer.get_minibatches(minibatch_size = self.minibatch_size):
+            for mb in self.buffer.get_minibatches(num_minibatches = self.num_minibatches):
                 b_obs = mb["obs"]
                 b_actions = mb["actions"]
                 b_log_probs = mb["log_probs"]

@@ -83,8 +83,9 @@ class Buffer():
             self.rewards, self.values, next_values, self.terminateds, self.truncateds, self.gamma, self.lam
             )
 
-    def get_minibatches(self, minibatch_size):
+    def get_minibatches(self, num_minibatches):
         batch_size = self.num_steps * self.num_envs
+        minibatch_size = batch_size // num_minibatches # leftover samples (batch_size % num_minibatches) are skipped this epoch
 
         b_obs = self.obs.reshape(batch_size, self.obs_dim)
         b_actions = self.actions.reshape(batch_size, self.action_dim)
@@ -97,7 +98,7 @@ class Buffer():
 
         indices = torch.randperm(batch_size, device=self.device)
 
-        for start in range(0,batch_size, minibatch_size):
+        for start in range(0, num_minibatches * minibatch_size, minibatch_size):
             mb = indices[start:start + minibatch_size]
 
             yield {
