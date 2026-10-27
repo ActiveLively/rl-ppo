@@ -31,7 +31,10 @@ def run_ppo():
     gamma = 0.995
     lam = 0.95
 
-    env = MJXEnv(args.env, args.num_envs, episode_length=args.episode_length, impl=args.impl)
+    env = MJXEnv(
+        args.env, args.num_envs, episode_length=args.episode_length,
+        config_overrides={"impl": args.impl} if args.impl else None
+    )
     device = env.device
 
     logger = TrainingLogger(
