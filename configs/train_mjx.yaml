@@ -1,0 +1,39 @@
+env: 
+  name: CartpoleBalance
+  num_envs: 1024
+  episode_length: null # null = env default
+  impl: null           # "jax" on Mac / non-NVIDIA, "warp" on NVIDIA
+
+iters: 300
+
+model: # -> ActorCritic(**model)
+  actor_hidden_dim: [256, 256]
+  critic_hidden_dim: [256, 256]
+  activation: elu
+  dropout: 0.0
+  norm: null
+  residual: false
+  init: orthogonal
+  actor_gain: 1.4142135623730951
+  critic_gain: 1.4142135623730951
+  actor_output_gain: 0.01
+  critic_output_gain: 1.0
+  state_dependent: false
+
+ppo: # -> PPO(**ppo)
+  steps: 32
+  epochs: 5
+  num_minibatches: 4
+  lr: 1.0e-3
+  clip_eps: 0.2
+  c1_value: 1.0
+  c2_entropy: 0.01
+  max_grad_norm: 1.0
+  desired_kl: 0.01
+  clip_value: true
+  normalize_value: true # 1000-step episodes with gamma 0.995 -> returns in the 100s
+  normalize_obs: true
+
+gae: # -> Buffer(**gae)
+  gamma: 0.995
+  lam: 0.95

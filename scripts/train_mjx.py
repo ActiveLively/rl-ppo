@@ -1,17 +1,25 @@
 import argparse
+# from omegaconf import OmegaConf
 
 import torch
 
 from rl_ppo import ActorCritic, Buffer, PPO, Runner, TrainingLogger
 from rl_ppo.envs.mjx_env import MJXEnv
 
+
 parser = argparse.ArgumentParser()
+
 parser.add_argument("--env", default="CartpoleBalance") # any name in mujoco_playground.registry.ALL_ENVS
 parser.add_argument("--num_envs", type=int, default=1024)
 parser.add_argument("--iters", type=int, default=300)
 parser.add_argument("--episode_length", type=int, default=None) # None = the env's default
 parser.add_argument("--impl", default=None) # Playground >= 0.1: "jax" on a Mac / non-NVIDIA, "warp" needs an NVIDIA GPU
+
+# cfg = OmegaConf.merge(OmegaConf.load(args.config), OmegaConf.from_dotlist(overrides))
+# cfg = OmegaConf.to_container(cfg, resolve=True)
+
 args = parser.parse_args()
+
 
 
 def run_ppo():
