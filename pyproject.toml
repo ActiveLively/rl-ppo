@@ -12,6 +12,7 @@ dependencies = ["torch", "numpy", "tqdm"]
 [project.optional-dependencies]
 gym = ["gymnasium", "gymnasium-robotics"]
 mjx = ["playground"] # MuJoCo Playground: pulls in jax, mujoco-mjx, brax
+wandb = ["wandb"]
 # sharing one env with [gym]: gymnasium-robotics 1.4.2's Fetch envs break on mujoco 3.17 (latest playground),
 # so pin `playground==0.0.5 mujoco==3.3.6 mujoco-mjx==3.3.6` there
 

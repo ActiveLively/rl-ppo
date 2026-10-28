@@ -70,6 +70,31 @@ class TensorBoardWriter:
         self.w.close()
 
 
+class WandbWriter:
+    '''Weights & Biases; joins the caller's run if one is already active, otherwise starts (and later finishes) its own.
+    not in WRITERS since it needs a project/config instead of log_dir: pass an instance in TrainingLogger(writers=...)'''
+    def __init__(self, project=None, name=None, config=None, group=None, tags=None, **init_kwargs):
+        import wandb  # needs `pip install wandb`
+        self.owns_run = wandb.run is None
+        if self.owns_run:
+            self.run = wandb.init(project=project, name=name, config=config, group=group, tags=tags, **init_kwargs)
+        else:
+            self.run = wandb.run
+            if config:
+                self.run.config.update({"ppo": config}, allow_val_change=True)  # namespaced, no clash with the caller's keys
+
+        # x-axis = env steps, not wandb's internal log counter, so other code can log to the same run anytime
+        self.run.define_metric("env_step")
+        self.run.define_metric("*", step_metric="env_step")
+
+    def write(self, step, metrics):
+        self.run.log({"env_step": step, **metrics})
+
+    def close(self):
+        if self.owns_run:  # the caller finishes runs it started
+            self.run.finish()
+
+
 WRITERS = {"jsonl": JSONLWriter, "tensorboard": TensorBoardWriter}
 
 

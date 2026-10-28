@@ -5,6 +5,7 @@ import torch
 
 from rl_ppo import ActorCritic, Buffer, PPO, Runner, TrainingLogger
 from rl_ppo.envs.mjx_env import MJXEnv
+from rl_ppo.logger import WandbWriter
 
 
 parser = argparse.ArgumentParser()
@@ -14,6 +15,9 @@ parser.add_argument("--num_envs", type=int, default=1024)
 parser.add_argument("--iters", type=int, default=300)
 parser.add_argument("--episode_length", type=int, default=None) # None = the env's default
 parser.add_argument("--impl", default=None) # Playground >= 0.1: "jax" on a Mac / non-NVIDIA, "warp" needs an NVIDIA GPU
+parser.add_argument("--wandb", action="store_true")
+parser.add_argument("--wandb_project", default="rl-ppo")
+parser.add_argument("--wandb_group", default=None) # e.g. one group per experiment, one run per seed
 
 # cfg = OmegaConf.merge(OmegaConf.load(args.config), OmegaConf.from_dotlist(overrides))
 # cfg = OmegaConf.to_container(cfg, resolve=True)
@@ -45,17 +49,24 @@ def run_ppo():
     )
     device = env.device
 
+    run_name = f"mjx_{args.env}"
+    config = dict(
+        env_id = args.env, num_envs = env.num_envs, iters = args.iters, steps = steps, epochs = epochs,
+        num_minibatches = num_minibatches, lr = lr, clip_eps = clip_eps, c1_value = c1_value,
+        c2_entropy = c2_entropy, gamma = gamma, lam = lam, max_grad_norm = max_grad_norm,
+        desired_kl = desired_kl, clip_value = clip_value, normalize_value = normalize_value,
+        normalize_obs = normalize_obs, impl = args.impl
+    )
+
+    writers = ["jsonl"]
+    if args.wandb:
+        writers.append(WandbWriter(project=args.wandb_project, name=run_name, group=args.wandb_group, config=config))
+
     logger = TrainingLogger(
         log_dir = "runs",
-        run_name = f"mjx_{args.env}",
-        writers = ("jsonl",),
-        config = dict(
-            env_id = args.env, num_envs = env.num_envs, iters = args.iters, steps = steps, epochs = epochs,
-            num_minibatches = num_minibatches, lr = lr, clip_eps = clip_eps, c1_value = c1_value,
-            c2_entropy = c2_entropy, gamma = gamma, lam = lam, max_grad_norm = max_grad_norm,
-            desired_kl = desired_kl, clip_value = clip_value, normalize_value = normalize_value,
-            normalize_obs = normalize_obs, impl = args.impl
-        )
+        run_name = run_name,
+        writers = writers,
+        config = config
     )
 
     actor_critic = ActorCritic(
@@ -107,7 +118,7 @@ def run_ppo():
     runner.train(iters = args.iters)
     logger.close()
 
-    runner.save(f"checkpoints/mjx_{args.env}.pt")
+    runner.save(f"checkpoints/{run_name}.pt")
 
 
 if __name__ == "__main__":
