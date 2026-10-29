@@ -7,7 +7,7 @@ import torch
 
 # ---------------------------------------------------------------------------------------------
 # PPO training logger: algorithm diagnostics + rollout stats only. sim data (forces, torques,
-# raw per-step recording) comes from a separate collector and is passed in through `extra`
+# raw per-step recording) is logged by its own library, e.g. sim_logging.SimLogWrapper
 # ---------------------------------------------------------------------------------------------
 class MeanTracker:
     '''averages scalar diagnostics over minibatches, e.g. inside PPO.update()'''
