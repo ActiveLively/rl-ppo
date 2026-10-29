@@ -1,4 +1,4 @@
-class SimTrackedEnv:
+class TrackWrapper:
     '''
     VecEnv wrapper that feeds a sim-side collector (e.g. sim_logging.SimDataCollector) without touching PPO:
         step()        -> collector.on_env_step(terminated, truncated), right after the env step
