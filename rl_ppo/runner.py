@@ -31,7 +31,7 @@ class Runner:
                 step = self.iteration * steps_per_iter,
                 ppo_stats = ppo_stats,
                 buffer = self.ppo.buffer,
-                extra = self.env.pop_metrics()
+                extra = {**self.env.pop_metrics(), **self.ppo.obs_stats()}
             )
 
             postfix = {"avg_reward": f"{metrics['rollout/reward_mean']:.3f}", "kl": f"{ppo_stats['kl']:.4f}"}
@@ -51,6 +51,7 @@ class Runner:
             ckpt["obs_mean"] = self.ppo.obs_rms.mean.cpu().numpy()
             ckpt["obs_var"] = self.ppo.obs_rms.var.cpu().numpy()
             ckpt["obs_count"] = self.ppo.obs_rms.count
+            ckpt["obs_clip"] = self.ppo.obs_rms.clip
         if self.ppo.value_rms is not None:
             ckpt["value_rms"] = self.ppo.value_rms.state_dict()
         torch.save(ckpt, path)

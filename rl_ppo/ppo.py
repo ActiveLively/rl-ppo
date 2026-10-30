@@ -26,7 +26,8 @@ class PPO():
             desired_kl: float | None = None,
             clip_value: bool = False,
             normalize_value: bool = False,
-            normalize_obs: bool = True
+            normalize_obs: bool = True,
+            obs_clip: float | None = None
         ):
         '''
         max_grad_norm:   global grad-norm clip
@@ -37,6 +38,7 @@ class PPO():
                          buffer still holds values/returns in reward scale, so GAE and logging are unchanged
         normalize_obs:   running mean/std obs normalization on the GPU, updated every rollout step (rsl_rl EmpiricalNormalization).
                          buffer stores normalized obs, so update() sees exactly what the rollout policy saw
+        obs_clip:        normalized obs are limited to +-obs_clip, so one outlier can't swamp the network. None = no limit
         '''
         self.env = env
         self.actor_critic = actor_critic
@@ -54,7 +56,7 @@ class PPO():
 
         device = next(self.actor_critic.parameters()).device
         self.value_rms = RunningMeanStd(shape = (), device = device) if normalize_value else None
-        self.obs_rms = RunningMeanStd(shape = (buffer.obs_dim,), device = device) if normalize_obs else None
+        self.obs_rms = RunningMeanStd(shape = (buffer.obs_dim,), device = device, clip = obs_clip) if normalize_obs else None
 
         self.optimizer = torch.optim.Adam(self.actor_critic.parameters(), lr = self.lr)
 
@@ -69,6 +71,22 @@ class PPO():
         if update:
             self.obs_rms.update(obs)
         return self.obs_rms.normalize(obs)
+
+    @torch.no_grad()
+    def obs_stats(self):
+        '''normalizer state of the channels the env added, and how much of the last rollout hit obs_clip'''
+        if self.obs_rms is None:
+            return {}
+        rms = self.obs_rms
+        clip = rms.clip if rms.clip is not None else float("inf")
+        clipped = (self.buffer.obs.abs() >= clip).float().mean(dim = (0, 1)) # [obs_dim], clipped values sit exactly at +-clip
+
+        names = getattr(self.env, "added_obs_names", [])
+        first = self.buffer.obs_dim - len(names) # added channels are the last obs columns
+        stats = {"obs_norm/clip_frac": clipped.mean().item()}
+        for stat, values in {"mean": rms.mean, "std": rms.std, "clip_frac": clipped}.items():
+            stats.update({f"obs_norm/{name}_{stat}": v for name, v in zip(names, values[first:].tolist())})
+        return stats
 
     @torch.no_grad()
     def rollout(self):

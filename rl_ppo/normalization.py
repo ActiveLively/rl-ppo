@@ -5,9 +5,11 @@ class RunningMeanStd():
     '''
     running mean/var on the GPU (parallel Welford update), torch version of gym's obs_rms.
     shape = () for scalars (e.g. value/return normalization), (obs_dim,) for observations
+    clip: normalize() limits its output to +-clip. None = no limit
     '''
-    def __init__(self, shape = (), device = "cpu", epsilon: float = 1e-4):
+    def __init__(self, shape = (), device = "cpu", epsilon: float = 1e-4, clip: float | None = None):
         self.shape = torch.Size(shape)
+        self.clip = clip
         self.mean = torch.zeros(self.shape, device=device)
         self.var = torch.ones(self.shape, device=device)
         self.count = epsilon
@@ -32,7 +34,8 @@ class RunningMeanStd():
         return torch.sqrt(self.var + 1e-8)
 
     def normalize(self, x):
-        return (x - self.mean) / self.std
+        x = (x - self.mean) / self.std
+        return x if self.clip is None else x.clamp(-self.clip, self.clip)
 
     def denormalize(self, x):
         return x * self.std + self.mean
