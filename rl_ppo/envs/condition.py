@@ -12,16 +12,20 @@ class ConditionWrapper:
         __getattr__(self, name) -> passes the functions that come through 
     '''
     def __init__(self, env, condition: str | None = None, sensors: list[str] | None = None,
-                 sensor_clip: dict[str, float] | None = None):
+                 sensor_clip: dict[str, float] | None = None, monitor: bool = False):
         self.env = env
         self.condition = condition
         self.num_envs = env.num_envs
         self.obs_dim = env.obs_dim
         self.action_dim = env.action_dim
         self.device = env.device
-        self.sensor_idx, self.sensor_limit, self.added_obs_names = None, None, []
+        if monitor and condition is not None:
+            raise ValueError(f"monitor is for runs with no condition, got: {condition}")
+        self.sensor_idx, self.sensor_limit, self.added_obs_names, self.sensor_names = None, None, [], []
+        if condition == "force" or monitor: # monitor: log the sensors, don't add them to the obs
+            self.sensor_idx, self.sensor_limit, self.sensor_names = self._sensor_columns(sensors, sensor_clip or {})
         if condition == "force":
-            self.sensor_idx, self.sensor_limit, self.added_obs_names = self._sensor_columns(sensors, sensor_clip or {})
+            self.added_obs_names = self.sensor_names
         self.raw_sensors = [] # readings before sensor_clip since the last pop_metrics()
         self.obs = self._augment(env.get_obs())
         self.obs_dim = self.obs.shape[-1] # update obs dim to after a possible _added_data()
@@ -47,7 +51,7 @@ class ConditionWrapper:
     def _raw_data(self, data = None):
         if data is None:
             data = self.env.data
-        if self.condition == "force":
+        if self.sensor_idx is not None:
             extra = _to_torch(data.sensordata)[..., self.sensor_idx]
         elif self.condition == "torque":
             extra = _to_torch(data.actuator_force)
@@ -91,7 +95,7 @@ class ConditionWrapper:
             "clip_frac": (size > self.sensor_limit).float().mean(dim = 0)
         }
         for stat, values in stats.items():
-            metrics.update({f"obs/{name}_{stat}": v for name, v in zip(self.added_obs_names, values.tolist())})
+            metrics.update({f"obs/{name}_{stat}": v for name, v in zip(self.sensor_names, values.tolist())})
         return metrics
 
     def __getattr__(self, name):
