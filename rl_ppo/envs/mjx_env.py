@@ -60,7 +60,8 @@ class MJXEnv:
             config_overrides: dict | None = None,
             obs_key: str = "state",
             clip_actions: float | None = 1.0,
-            full_reset: bool = False
+            full_reset: bool = False,
+            randomize_start: bool = False
         ):
         '''
         env:              a Playground registry name, or an already built Playground env (e.g. your own task)
@@ -72,6 +73,8 @@ class MJXEnv:
         full_reset:       False = done envs restore their cached first state (Playground default, fast but every env
                           always restarts from the same pose). True = sample a fresh random reset each episode.
                           Playground >= 0.1 only
+        randomize_start:  True = begin each env partway through its first episode's time limit, so resets are spread
+                          across the episode instead of landing on the same step. only the first episode is cut short
         '''
         if isinstance(env, str):
             env = registry.load(env, config_overrides = config_overrides)
@@ -93,7 +96,11 @@ class MJXEnv:
         self.clip_actions = clip_actions
         self.action_dim = env.action_size
 
-        self.state = self._reset(jax.random.split(jax.random.PRNGKey(seed), num_envs)) # one key per env
+        key = jax.random.PRNGKey(seed)
+        self.state = self._reset(jax.random.split(key, num_envs)) # one key per env
+        if randomize_start:
+            start = jax.random.randint(jax.random.fold_in(key, 1), (num_envs,), 0, episode_length)
+            self.state.info["steps"] = self.state.info["steps"] + start
         self.obs = self._get_obs()
         self.obs_dim = self.obs.shape[-1]
         self.device = self.obs.device
