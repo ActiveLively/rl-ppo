@@ -6,8 +6,9 @@ from torch.distributions import Normal
 
 class ActorCritic(nn.Module):
     def __init__(self, 
-                 input_dim: int, 
+                 actor_input_dim: int, 
                  actor_hidden_dim: None, 
+                 critic_input_dim: int,
                  critic_hidden_dim: None,
                  action_dim: int = 17, 
                 #  critic_output_dim: int = 1,
@@ -20,9 +21,17 @@ class ActorCritic(nn.Module):
                  critic_gain: float = (5/3),
                  actor_output_gain: float = 0.01,
                  critic_output_gain: float = 1.0,
-                 state_dependent: bool = False
+                 state_dependent: bool = False,
+                 actor_cond: bool = True,
+                 critic_cond: bool = True
                  ):
+        '''
+        actor_input_dim / critic_input_dim: obs_dim, + cond_dim for a network that gets cond
+        actor_cond / critic_cond:           whether that network gets cond (the env's conditioning data, e.g. wrist F/T)
+        '''
         super().__init__()
+        self.actor_cond = actor_cond
+        self.critic_cond = critic_cond
 
         # set the actor output dimensions depending on if we want a state-dependent std-dev
         self.state_dependent = state_dependent
@@ -32,9 +41,10 @@ class ActorCritic(nn.Module):
             #Actor Std Dev: state-independent learned parameter
             actor_output_dim = action_dim
             self.log_std = nn.Parameter(torch.zeros(action_dim))
+            
 
         self.actor = MLP(
-            input_dim = input_dim,
+            input_dim = actor_input_dim,
             hidden_dim = actor_hidden_dim,
             output_dim = actor_output_dim,
             activation = activation, 
@@ -47,7 +57,7 @@ class ActorCritic(nn.Module):
         )
 
         self.critic = MLP(
-            input_dim = input_dim,
+            input_dim = critic_input_dim,
             hidden_dim = critic_hidden_dim,
             output_dim = 1, # output value for the current state
             activation = activation, 
@@ -59,10 +69,19 @@ class ActorCritic(nn.Module):
             output_gain = critic_output_gain
         )
 
-    def get_mean_std(self, x):
+    def _input(self, x, cond, use_cond):
+        '''
+        how a network takes cond. concat for now, FiLM or a separate cond encoder would go here
+        '''
+        if not use_cond or cond is None:
+            return x
+        return torch.cat([x, cond], dim = -1)
+
+    def get_mean_std(self, x, cond = None):
         '''
         depends on state_dependence flag
         '''
+        x = self._input(x, cond, self.actor_cond)
         if self.state_dependent:
             mean, log_std = torch.chunk(self.actor(x), 2, dim = -1)
         else:
@@ -71,25 +90,25 @@ class ActorCritic(nn.Module):
         std = torch.exp(log_std.clamp(-5, 2))
         return mean, std
 
-    def act(self, x):
-        mean, std = self.get_mean_std(x)
+    def act(self, x, cond = None):
+        mean, std = self.get_mean_std(x, cond)
         dist = Normal(mean, std)
 
         action = dist.sample() # sample to explore actions
         log_prob = dist.log_prob(action).sum(dim=-1)
-        value = self.value(x)
+        value = self.value(x, cond)
 
         return action, log_prob, value, mean, std # mean/std stored for the exact KL in update()
 
-    def value(self, x):
-        return self.critic(x).squeeze(-1)
+    def value(self, x, cond = None):
+        return self.critic(self._input(x, cond, self.critic_cond)).squeeze(-1)
 
-    def evaluate(self, x, action):
-        mean, std = self.get_mean_std(x)
+    def evaluate(self, x, action, cond = None):
+        mean, std = self.get_mean_std(x, cond)
         dist = Normal(mean, std)
 
         log_prob = dist.log_prob(action).sum(dim=-1)
         entropy = dist.entropy().sum(dim=-1)
-        value = self.value(x)
+        value = self.value(x, cond)
 
         return log_prob, entropy, value, mean, std

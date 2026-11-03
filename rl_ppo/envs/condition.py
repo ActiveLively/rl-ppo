@@ -4,15 +4,16 @@ from .mjx_env import _to_torch
 
 class ConditionWrapper:
     '''
-    Condition wrapper that modifies the obs data that is fed to the actor and critic (or just critic) without touching PPO:
-    
-        _added_data() -> returns the data we want to add to obs
-        _augment(self, obs) -> if condition has a string item to condition on, concatenate 
+    Condition wrapper that hands PPO conditioning data (cond) next to the env's obs, for the actor and critic (or just critic):
+
+        _added_data() -> returns the conditioning data
+        _augment(self, obs) -> (obs, cond). obs passes through unchanged, ActorCritic decides how to use cond
+        get_cond() -> cond for the current obs, [num_envs, cond_dim]. cond_dim = 0 without a condition
 
         __getattr__(self, name) -> passes the functions that come through 
     '''
     def __init__(self, env, condition: str | None = None, sensors: list[str] | None = None,
-                 sensor_clip: dict[str, float] | None = None, monitor: bool = False):
+                 sensor_clip: dict[str, float] | None = None, monitor: bool = False, critic_only: bool = True):
         self.env = env
         self.condition = condition
         self.num_envs = env.num_envs
@@ -21,14 +22,15 @@ class ConditionWrapper:
         self.device = env.device
         if monitor and condition is not None:
             raise ValueError(f"monitor is for runs with no condition, got: {condition}")
-        self.sensor_idx, self.sensor_limit, self.added_obs_names, self.sensor_names = None, None, [], []
-        if condition == "force" or monitor: # monitor: log the sensors, don't add them to the obs
+        self.critic_only = critic_only # only the critic gets cond, see make_actor_critic in the training script
+        self.sensor_idx, self.sensor_limit, self.cond_names, self.sensor_names = None, None, [], []
+        if condition == "force" or monitor: # monitor: log the sensors, don't hand them to PPO
             self.sensor_idx, self.sensor_limit, self.sensor_names = self._sensor_columns(sensors, sensor_clip or {})
         if condition == "force":
-            self.added_obs_names = self.sensor_names
+            self.cond_names = self.sensor_names
         self.raw_sensors = [] # readings before sensor_clip since the last pop_metrics()
-        self.obs = self._augment(env.get_obs())
-        self.obs_dim = self.obs.shape[-1] # update obs dim to after a possible _added_data()
+        self.obs, self.cond = self._augment(env.get_obs())
+        self.cond_dim = self.cond.shape[-1]
 
     def _sensor_columns(self, names, sensor_clip):
         '''
@@ -67,15 +69,18 @@ class ConditionWrapper:
 
     def _augment(self, obs):
         if self.condition is None:
-            return obs  
-        return torch.cat([obs, self._added_data()], dim = -1)
+            return obs, obs[..., :0] # empty cond, [num_envs, 0]
+        return obs, self._added_data()
 
     def get_obs(self):
         return self.obs
 
+    def get_cond(self):
+        return self.cond
+
     def step(self, action):
         obs, reward, terminated, truncated = self.env.step(action)
-        self.obs = self._augment(obs)
+        self.obs, self.cond = self._augment(obs)
         if self.sensor_idx is not None:
             self.raw_sensors.append(self._raw_data())
         return self.obs, reward, terminated, truncated

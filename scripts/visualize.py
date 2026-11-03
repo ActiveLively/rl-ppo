@@ -16,7 +16,8 @@ env.obs_rms.var = ckpt["obs_var"]
 
 # must match the architecture in main.py
 actor_critic = ActorCritic(
-    input_dim = env.observation_space.shape[0],
+    actor_input_dim = env.observation_space.shape[0],
+    critic_input_dim = env.observation_space.shape[0],
     actor_hidden_dim = [256, 256],
     critic_hidden_dim = [256, 256],
     action_dim = env.action_space.shape[0],

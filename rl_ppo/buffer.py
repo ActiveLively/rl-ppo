@@ -33,16 +33,18 @@ def calculate_gae(rewards, values, next_values, terminated, truncated, gamma, la
 
 
 class Buffer():
-    def __init__(self, num_steps, num_envs, obs_dim, action_dim, device, gamma, lam):
+    def __init__(self, num_steps, num_envs, obs_dim, action_dim, device, gamma, lam, cond_dim = 0):
         self.num_steps = num_steps
         self.num_envs = num_envs
         self.obs_dim = obs_dim
+        self.cond_dim = cond_dim # conditioning data stored next to obs (ConditionWrapper), 0 = none
         self.action_dim = action_dim
         self.device = device
         self.gamma = gamma
         self.lam = lam
 
         self.obs = torch.zeros(self.num_steps, self.num_envs, self.obs_dim, device=self.device)
+        self.cond = torch.zeros(self.num_steps, self.num_envs, self.cond_dim, device=self.device)
         self.actions = torch.zeros(self.num_steps, self.num_envs, self.action_dim, device=self.device)
         self.log_prob = torch.zeros(self.num_steps, self.num_envs, device=self.device)
         self.mu = torch.zeros(self.num_steps, self.num_envs, self.action_dim, device=self.device) # rollout policy mean/std, for the exact KL
@@ -59,10 +61,12 @@ class Buffer():
     def reset(self):
         self.step = 0
 
-    def add(self, obs, action, log_prob, reward, terminated, truncated, value, mu, sigma):
+    def add(self, obs, action, log_prob, reward, terminated, truncated, value, mu, sigma, cond = None):
         assert self.step < self.num_steps # should not trigger
 
         self.obs[self.step] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
+        if cond is not None:
+            self.cond[self.step] = torch.as_tensor(cond, dtype=torch.float32, device=self.device)
         self.actions[self.step] = torch.as_tensor(action, dtype=torch.float32, device=self.device)
         self.log_prob[self.step] = torch.as_tensor(log_prob, dtype=torch.float32, device=self.device)
         self.rewards[self.step] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
@@ -88,6 +92,7 @@ class Buffer():
         minibatch_size = batch_size // num_minibatches # leftover samples (batch_size % num_minibatches) are skipped this epoch
 
         b_obs = self.obs.reshape(batch_size, self.obs_dim)
+        b_cond = self.cond.reshape(batch_size, self.cond_dim)
         b_actions = self.actions.reshape(batch_size, self.action_dim)
         b_log_probs = self.log_prob.reshape(batch_size)
         b_advantages = self.advantages.reshape(batch_size)
@@ -103,6 +108,7 @@ class Buffer():
 
             yield {
                 "obs": b_obs[mb],
+                "cond": b_cond[mb],
                 "actions": b_actions[mb],
                 "log_probs": b_log_probs[mb],
                 "advantages": b_advantages[mb],

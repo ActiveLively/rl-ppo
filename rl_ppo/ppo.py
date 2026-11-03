@@ -57,6 +57,8 @@ class PPO():
         device = next(self.actor_critic.parameters()).device
         self.value_rms = RunningMeanStd(shape = (), device = device) if normalize_value else None
         self.obs_rms = RunningMeanStd(shape = (buffer.obs_dim,), device = device, clip = obs_clip) if normalize_obs else None
+        # cond (ConditionWrapper) gets its own stats, same clip. None without cond: a 0-dim normalizer can't update
+        self.cond_rms = RunningMeanStd(shape = (buffer.cond_dim,), device = device, clip = obs_clip) if normalize_obs and buffer.cond_dim > 0 else None
 
         self.optimizer = torch.optim.Adam(self.actor_critic.parameters(), lr = self.lr)
 
@@ -64,28 +66,33 @@ class PPO():
         '''critic output -> reward scale'''
         return self.value_rms.denormalize(value) if self.value_rms is not None else value
 
-    def _normalize_obs(self, obs, update = False):
-        '''raw env obs -> policy input'''
-        if self.obs_rms is None:
-            return obs
+    def _normalize(self, x, rms, update = False):
+        '''raw env obs / cond -> policy input'''
+        if rms is None:
+            return x
         if update:
-            self.obs_rms.update(obs)
-        return self.obs_rms.normalize(obs)
+            rms.update(x)
+        return rms.normalize(x)
+
+    def _get_cond(self, obs):
+        '''the env's conditioning data, [num_envs, 0] for envs without a ConditionWrapper'''
+        return self.env.get_cond() if hasattr(self.env, "get_cond") else obs[..., :0]
 
     @torch.no_grad()
     def obs_stats(self):
-        '''normalizer state of the channels the env added, and how much of the last rollout hit obs_clip'''
+        '''normalizer state of the cond channels, and how much of the last rollout hit obs_clip'''
         if self.obs_rms is None:
             return {}
-        rms = self.obs_rms
-        clip = rms.clip if rms.clip is not None else float("inf")
-        clipped = (self.buffer.obs.abs() >= clip).float().mean(dim = (0, 1)) # [obs_dim], clipped values sit exactly at +-clip
+        clip = self.obs_rms.clip if self.obs_rms.clip is not None else float("inf")
+        inputs = torch.cat([self.buffer.obs, self.buffer.cond], dim = -1)
+        stats = {"obs_norm/clip_frac": (inputs.abs() >= clip).float().mean().item()} # clipped values sit exactly at +-clip
+        if self.cond_rms is None:
+            return stats
 
-        names = getattr(self.env, "added_obs_names", [])
-        first = self.buffer.obs_dim - len(names) # added channels are the last obs columns
-        stats = {"obs_norm/clip_frac": clipped.mean().item()}
-        for stat, values in {"mean": rms.mean, "std": rms.std, "clip_frac": clipped}.items():
-            stats.update({f"obs_norm/{name}_{stat}": v for name, v in zip(names, values[first:].tolist())})
+        clipped = (self.buffer.cond.abs() >= clip).float().mean(dim = (0, 1)) # [cond_dim]
+        names = getattr(self.env, "cond_names", [])
+        for stat, values in {"mean": self.cond_rms.mean, "std": self.cond_rms.std, "clip_frac": clipped}.items():
+            stats.update({f"obs_norm/{name}_{stat}": v for name, v in zip(names, values.tolist())})
         return stats
 
     @torch.no_grad()
@@ -94,14 +101,17 @@ class PPO():
         raw_obs = self.env.get_obs()
 
         for i in range(self.steps):
-            obs = self._normalize_obs(raw_obs, update = True)
-            action, log_prob, value, mu, sigma = self.actor_critic.act(obs)
+            obs = self._normalize(raw_obs, self.obs_rms, update = True)
+            cond = self._normalize(self._get_cond(raw_obs), self.cond_rms, update = True)
+            action, log_prob, value, mu, sigma = self.actor_critic.act(obs, cond)
             raw_obs, reward, terminated, truncated = self.env.step(action)
-            self.buffer.add(obs, action, log_prob, reward, terminated, truncated, self._denormalize_value(value), mu, sigma)
+            self.buffer.add(obs, action, log_prob, reward, terminated, truncated, self._denormalize_value(value), mu, sigma, cond)
 
         # bootstrap value of the state after the last collected step -> [num_envs]
         # no stats update here, this obs is counted at the start of the next rollout
-        next_values = self._denormalize_value(self.actor_critic.value(self._normalize_obs(raw_obs)))
+        obs = self._normalize(raw_obs, self.obs_rms)
+        cond = self._normalize(self._get_cond(raw_obs), self.cond_rms)
+        next_values = self._denormalize_value(self.actor_critic.value(obs, cond))
 
         self.buffer.compute_advantage_return(next_values)
 
@@ -115,6 +125,7 @@ class PPO():
         for epoch in range(self.epochs):
             for mb in self.buffer.get_minibatches(num_minibatches = self.num_minibatches):
                 b_obs = mb["obs"]
+                b_cond = mb["cond"]
                 b_actions = mb["actions"]
                 b_log_probs = mb["log_probs"]
                 b_advantages = mb["advantages"]
@@ -128,7 +139,7 @@ class PPO():
                     b_returns = self.value_rms.normalize(b_returns)
                     b_values = self.value_rms.normalize(b_values)
 
-                log_probs, entropy, values, mu, sigma = self.actor_critic.evaluate(b_obs, b_actions)
+                log_probs, entropy, values, mu, sigma = self.actor_critic.evaluate(b_obs, b_actions, b_cond)
 
                 log_ratio = log_probs - b_log_probs
                 ratio = torch.exp(log_ratio)
@@ -184,7 +195,7 @@ class PPO():
                     )
 
         with torch.no_grad():
-            _, std = self.actor_critic.get_mean_std(b_obs)
+            _, std = self.actor_critic.get_mean_std(b_obs, b_cond)
         return {**stats.means(), "action_std": std.mean().item(), "lr": self.optimizer.param_groups[0]["lr"]}
 
 

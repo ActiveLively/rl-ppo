@@ -48,7 +48,8 @@ def run_ppo():
     )
 
     actor_critic = ActorCritic(
-        input_dim = env.obs_dim,
+        actor_input_dim = env.obs_dim,
+        critic_input_dim = env.obs_dim,
         actor_hidden_dim = [256,256],
         critic_hidden_dim = [256, 256],
         action_dim = env.action_dim,

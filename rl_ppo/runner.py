@@ -52,6 +52,8 @@ class Runner:
             ckpt["obs_var"] = self.ppo.obs_rms.var.cpu().numpy()
             ckpt["obs_count"] = self.ppo.obs_rms.count
             ckpt["obs_clip"] = self.ppo.obs_rms.clip
+        if self.ppo.cond_rms is not None:
+            ckpt["cond_rms"] = self.ppo.cond_rms.state_dict()
         if self.ppo.value_rms is not None:
             ckpt["value_rms"] = self.ppo.value_rms.state_dict()
         torch.save(ckpt, path)
@@ -69,5 +71,7 @@ class Runner:
                 "var": torch.as_tensor(ckpt["obs_var"], device = device),
                 "count": ckpt["obs_count"],
             })
+        if self.ppo.cond_rms is not None:
+            self.ppo.cond_rms.load_state_dict(ckpt["cond_rms"])
         if self.ppo.value_rms is not None:
             self.ppo.value_rms.load_state_dict(ckpt["value_rms"])
