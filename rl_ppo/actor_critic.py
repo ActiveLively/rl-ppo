@@ -23,15 +23,19 @@ class ActorCritic(nn.Module):
                  critic_output_gain: float = 1.0,
                  state_dependent: bool = False,
                  actor_cond: bool = True,
-                 critic_cond: bool = True
+                 critic_cond: bool = True,
+                 actor_cond_dim: int | None = None
                  ):
         '''
-        actor_input_dim / critic_input_dim: obs_dim, + cond_dim for a network that gets cond
+        actor_input_dim / critic_input_dim: obs_dim, + the cond columns that network gets
         actor_cond / critic_cond:           whether that network gets cond (the env's conditioning data, e.g. wrist F/T)
+        actor_cond_dim:                     the actor gets only cond's first actor_cond_dim columns, the rest is for the
+                                            critic alone (ConditionWrapper puts critic-only data last). None = all of cond
         '''
         super().__init__()
         self.actor_cond = actor_cond
         self.critic_cond = critic_cond
+        self.actor_cond_dim = actor_cond_dim
 
         # set the actor output dimensions depending on if we want a state-dependent std-dev
         self.state_dependent = state_dependent
@@ -69,19 +73,22 @@ class ActorCritic(nn.Module):
             output_gain = critic_output_gain
         )
 
-    def _input(self, x, cond, use_cond):
+    def _input(self, x, cond, use_cond, cond_dim = None):
         '''
         how a network takes cond. concat for now, FiLM or a separate cond encoder would go here
+        cond_dim: use only cond's first cond_dim columns
         '''
         if not use_cond or cond is None:
             return x
+        if cond_dim is not None:
+            cond = cond[..., :cond_dim]
         return torch.cat([x, cond], dim = -1)
 
     def get_mean_std(self, x, cond = None):
         '''
         depends on state_dependence flag
         '''
-        x = self._input(x, cond, self.actor_cond)
+        x = self._input(x, cond, self.actor_cond, self.actor_cond_dim)
         if self.state_dependent:
             mean, log_std = torch.chunk(self.actor(x), 2, dim = -1)
         else:
